@@ -1,143 +1,150 @@
 #!/usr/bin/env python3
-"""Render the news-summary image for the make.fun bounty
+"""Build the front-page image for the make.fun bounty
 "Sum up 21 November's world news in one image" (news-image-20261121).
 
-Output: assets/entry.png — 1024x1024 PNG, code-rendered with PIL only
-(no AI image generation, no network, no external assets).
+The picture is drawn from scratch with PIL: a navy masthead, five numbered
+news rows and a footer, all laid out on a warm off-white page. No AI image
+generator, no network, no files besides the fonts on this machine.
+
+Running it writes assets/entry.png — a 1024x1024 PNG.
 """
-import textwrap
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
-W, H = 1024, 1024
-OUT = Path(__file__).resolve().parent.parent / "assets" / "entry.png"
+PAGE_W, PAGE_H = 1024, 1024
+TARGET = Path(__file__).resolve().parent.parent / "assets" / "entry.png"
 
-PAPER = (250, 247, 240)      # warm off-white
-NAVY = (16, 38, 59)          # header band
-INK = (20, 32, 46)           # headline ink
-BODY = (61, 74, 87)          # summary ink
-MUTED = (120, 128, 138)      # footer / rules
-GOLD = (232, 179, 75)        # date line
-RULE = (214, 208, 196)       # divider lines
+# Palette.
+OFF_WHITE = (250, 247, 240)
+NAVY = (16, 38, 59)
+HEADLINE_INK = (20, 32, 46)
+SUMMARY_INK = (61, 74, 87)
+FAINT = (120, 128, 138)
+GOLD = (232, 179, 75)
+DIVIDER = (214, 208, 196)
+WHITE = (255, 255, 255)
 
-FONT_DIR = Path("/usr/share/fonts/truetype/dejavu")
-SERIF_B = ImageFont.truetype(str(FONT_DIR / "DejaVuSerif-Bold.ttf"), 66)
-SERIF_I = ImageFont.truetype(str(FONT_DIR / "DejaVuSerif.ttf"), 24)
-SANS_B = ImageFont.truetype(str(FONT_DIR / "DejaVuSans-Bold.ttf"), 31)
-SANS = ImageFont.truetype(str(FONT_DIR / "DejaVuSans.ttf"), 23)
-SANS_SM = ImageFont.truetype(str(FONT_DIR / "DejaVuSans.ttf"), 20)
-TAG = ImageFont.truetype(str(FONT_DIR / "DejaVuSans-Bold.ttf"), 21)
-NUM = ImageFont.truetype(str(FONT_DIR / "DejaVuSans-Bold.ttf"), 26)
+# Layout.
+HEADER_H = 148
+MARGIN = 48
+NUMBER_X = 48
+TEXT_X = 132
+FIRST_ROW_Y = 204
+ROW_H = 140
+ROW_GAP = 8
 
+# The day's five stories: tag, badge colour, one-line headline,
+# and a summary that fits on two lines.
 STORIES = [
-    {
-        "tag": "UKRAINE",
-        "color": (109, 40, 217),
-        "headline": "Russian missile hits Zelenskyy's hometown",
-        "summary": "A ballistic strike on Kryvyi Rih kills two — a boy of 7 and a woman of 20 — and wounds 60 in a double-tap attack.",
-    },
-    {
-        "tag": "MEXICO",
-        "color": (15, 118, 110),
-        "headline": "Mexico captures cartel boss 'El Chapo Isidro'",
-        "summary": "FBI most-wanted Fausto Isidro Meza Flores is seized in Sinaloa with US intelligence help; cartel gunmen retaliate.",
-    },
-    {
-        "tag": "CLIMATE",
-        "color": (29, 78, 137),
-        "headline": "COP31 climate talks run into overtime",
-        "summary": "The Antalya summit overruns its Friday deadline with no deal yet, and fossil fuels are missing from the draft text.",
-    },
-    {
-        "tag": "MARKETS",
-        "color": (180, 35, 24),
-        "headline": "AI sell-off drags world markets down",
-        "summary": "The S&P 500 falls 3.7% and the Nasdaq erases its 2026 gains as the AI sell-off spreads; Nikkei drops 5.06%.",
-    },
-    {
-        "tag": "GULF",
-        "color": (194, 65, 12),
-        "headline": "Iran says it struck US bases in Bahrain",
-        "summary": "Bahrain reports an Iranian attack set a civilian industrial site ablaze, with no injuries; Tehran claims the strike.",
-    },
+    ("UKRAINE", (109, 40, 217),
+     "Russian missile hits Zelenskyy's hometown",
+     "A ballistic strike on Kryvyi Rih kills two — a boy of 7 and a woman of 20 — and wounds 60 in a double-tap attack."),
+    ("MEXICO", (15, 118, 110),
+     "Mexico captures cartel boss 'El Chapo Isidro'",
+     "FBI most-wanted Fausto Isidro Meza Flores is seized in Sinaloa with US intelligence help; cartel gunmen retaliate."),
+    ("CLIMATE", (29, 78, 137),
+     "COP31 climate talks run into overtime",
+     "The Antalya summit overruns its Friday deadline with no deal yet, and fossil fuels are missing from the draft text."),
+    ("MARKETS", (180, 35, 24),
+     "AI sell-off drags world markets down",
+     "The S&P 500 falls 3.7% and the Nasdaq erases its 2026 gains as the AI sell-off spreads; Nikkei drops 5.06%."),
+    ("GULF", (194, 65, 12),
+     "Iran says it struck US bases in Bahrain",
+     "Bahrain reports an Iranian attack set a civilian industrial site ablaze, with no injuries; Tehran claims the strike."),
 ]
 
+DATE_LINE = "S A T U R D A Y  ·  2 1  N O V E M B E R  2 0 2 6"
+FOOTER_LINE = "Summarised from major news outlets  ·  21 November 2026"
 
-def wrap(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont, max_w: int) -> list[str]:
-    """Greedy word wrap; returns at most 2 lines (raises if it needs more)."""
+
+def _fonts():
+    base = Path("/usr/share/fonts/truetype/dejavu")
+    return {
+        "title": ImageFont.truetype(str(base / "DejaVuSerif-Bold.ttf"), 66),
+        "kicker": ImageFont.truetype(str(base / "DejaVuSerif.ttf"), 24),
+        "headline": ImageFont.truetype(str(base / "DejaVuSans-Bold.ttf"), 31),
+        "summary": ImageFont.truetype(str(base / "DejaVuSans.ttf"), 23),
+        "small": ImageFont.truetype(str(base / "DejaVuSans.ttf"), 20),
+        "tag": ImageFont.truetype(str(base / "DejaVuSans-Bold.ttf"), 21),
+        "number": ImageFont.truetype(str(base / "DejaVuSans-Bold.ttf"), 26),
+    }
+
+
+def _fit_lines(pen, text, font, width):
+    """Split a summary into at most two lines that fit `width`."""
     words = text.split()
-    lines, cur = [], ""
-    for w in words:
-        trial = f"{cur} {w}".strip()
-        if draw.textlength(trial, font=font) <= max_w:
-            cur = trial
+    lines = []
+    current = ""
+    for word in words:
+        candidate = f"{current} {word}".strip()
+        if pen.textlength(candidate, font=font) <= width:
+            current = candidate
         else:
-            lines.append(cur)
-            cur = w
-    if cur:
-        lines.append(cur)
+            lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
     if len(lines) > 2:
-        raise ValueError(f"summary needs {len(lines)} lines (>2): {text!r}")
+        raise ValueError(f"summary spills to {len(lines)} lines: {text!r}")
     return lines
 
 
-def main() -> None:
-    img = Image.new("RGB", (W, H), PAPER)
-    d = ImageDraw.Draw(img)
+def _centred(pen, text, y, font, colour):
+    width = pen.textlength(text, font=font)
+    pen.text(((PAGE_W - width) / 2, y), text, font=font, fill=colour)
 
-    # --- Header band ---
-    d.rectangle([0, 0, W, 148], fill=NAVY)
-    title = "THE WORLD TODAY"
-    tw = d.textlength(title, font=SERIF_B)
-    d.text(((W - tw) / 2, 26), title, font=SERIF_B, fill=(255, 255, 255))
-    date = "S A T U R D A Y  ·  2 1  N O V E M B E R  2 0 2 6"
-    dw = d.textlength(date, font=SANS_SM)
-    d.text(((W - dw) / 2, 106), date, font=SANS_SM, fill=GOLD)
 
-    # --- Kicker ---
-    kick = "Five stories that defined the day"
-    kw = d.textlength(kick, font=SERIF_I)
-    d.text(((W - kw) / 2, 160), kick, font=SERIF_I, fill=BODY)
-    d.line([48, 196, W - 48, 196], fill=RULE, width=2)
+def _masthead(pen, fonts):
+    pen.rectangle([0, 0, PAGE_W, HEADER_H], fill=NAVY)
+    _centred(pen, "THE WORLD TODAY", 26, fonts["title"], WHITE)
+    _centred(pen, DATE_LINE, 106, fonts["small"], GOLD)
 
-    # --- Story rows ---
-    text_x = 132
-    text_w = W - 48 - text_x  # 844
-    row_top = 204
-    row_h = 140
-    gap = 8
-    for i, s in enumerate(STORIES):
-        y = row_top + i * (row_h + gap)
-        # number circle
-        d.ellipse([48, y + 8, 104, y + 64], fill=s["color"])
-        num = f"{i + 1}"
-        nw = d.textlength(num, font=NUM)
-        d.text((48 + (56 - nw) / 2, y + 18), num, font=NUM, fill=(255, 255, 255))
-        # tag line
-        d.text((text_x, y + 2), s["tag"], font=TAG, fill=s["color"])
-        # headline
-        d.text((text_x, y + 30), s["headline"], font=SANS_B, fill=INK)
-        # summary (max 2 lines)
-        lines = wrap(d, s["summary"], SANS, text_w)
-        for j, line in enumerate(lines):
-            d.text((text_x, y + 74 + j * 30), line, font=SANS, fill=BODY)
-        # divider (not after the last row)
-        if i < len(STORIES) - 1:
-            d.line([48, y + row_h - 4, W - 48, y + row_h - 4], fill=RULE, width=2)
 
-    # --- Footer ---
-    foot = "Summarised from major news outlets  ·  21 November 2026"
-    fw = d.textlength(foot, font=SANS_SM)
-    d.text(((W - fw) / 2, 966), foot, font=SANS_SM, fill=MUTED)
-    note = "Code-rendered summary image"
-    nw = d.textlength(note, font=SANS_SM)
-    d.text(((W - nw) / 2, 992), note, font=SANS_SM, fill=MUTED)
+def _story_row(pen, fonts, index, story, top, show_divider):
+    tag, colour, headline, summary = story
+    # Numbered badge.
+    pen.ellipse([NUMBER_X, top + 8, NUMBER_X + 56, top + 64], fill=colour)
+    digit = f"{index + 1}"
+    digit_w = pen.textlength(digit, font=fonts["number"])
+    pen.text(
+        (NUMBER_X + (56 - digit_w) / 2, top + 18),
+        digit, font=fonts["number"], fill=WHITE,
+    )
+    # Tag, headline, then the summary on one or two lines.
+    pen.text((TEXT_X, top + 2), tag, font=fonts["tag"], fill=colour)
+    pen.text((TEXT_X, top + 30), headline, font=fonts["headline"], fill=HEADLINE_INK)
+    body_w = PAGE_W - MARGIN - TEXT_X
+    for offset, line in enumerate(_fit_lines(pen, summary, fonts["summary"], body_w)):
+        pen.text((TEXT_X, top + 74 + offset * 30), line, font=fonts["summary"], fill=SUMMARY_INK)
+    if show_divider:
+        pen.line(
+            [MARGIN, top + ROW_H - 4, PAGE_W - MARGIN, top + ROW_H - 4],
+            fill=DIVIDER, width=2,
+        )
 
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    img.save(OUT, format="PNG", optimize=True)
-    print(f"wrote {OUT}  {OUT.stat().st_size} bytes  {img.size}")
+
+def build():
+    canvas = Image.new("RGB", (PAGE_W, PAGE_H), OFF_WHITE)
+    pen = ImageDraw.Draw(canvas)
+    fonts = _fonts()
+
+    _masthead(pen, fonts)
+
+    _centred(pen, "Five stories that defined the day", 160, fonts["kicker"], SUMMARY_INK)
+    pen.line([MARGIN, 196, PAGE_W - MARGIN, 196], fill=DIVIDER, width=2)
+
+    for index, story in enumerate(STORIES):
+        top = FIRST_ROW_Y + index * (ROW_H + ROW_GAP)
+        _story_row(pen, fonts, index, story, top, show_divider=index < len(STORIES) - 1)
+
+    _centred(pen, FOOTER_LINE, 966, fonts["small"], FAINT)
+    _centred(pen, "Code-rendered summary image", 992, fonts["small"], FAINT)
+
+    TARGET.parent.mkdir(parents=True, exist_ok=True)
+    canvas.save(TARGET, format="PNG", optimize=True)
+    print(f"wrote {TARGET}  {TARGET.stat().st_size} bytes  {canvas.size}")
 
 
 if __name__ == "__main__":
-    main()
+    build()
